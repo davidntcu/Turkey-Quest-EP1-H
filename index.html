@@ -43,7 +43,7 @@
               },
               victoryPop: {
                 '0%': { opacity: '0', transform: 'scale(0.5) translateY(20px)' },
-                '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
+                '100%': { opacity: '1' },
               },
               pulseGlow: {
                 '0%, 100%': { filter: 'drop-shadow(0 0 5px rgba(234, 179, 8, 0.3))', transform: 'scale(1)' },
@@ -174,7 +174,7 @@
         DEFEAT: 'DEFEAT'
       };
 
-      window.GAME_VERSION = "v1.6.2";
+      window.GAME_VERSION = "v1.6.3";
 
       window.TRANSLATIONS = {
         [window.Language.EN]: {
@@ -891,20 +891,26 @@
         const isZh = lang === window.Language.ZH;
 
         const calculateFallbackStats = (level) => {
+            // Stats Nerfed: Smoother difficulty curve
             const bonus = Math.max(0, level - 1) * 2;
             return {
-                hp: 60 + level * 15 + bonus * 5, 
+                hp: 40 + level * 10 + bonus * 3,  
                 mp: 20 + level * 5,
-                attack: 12 + level * 3 + bonus,
-                defense: 5 + level * 2 + bonus
+                attack: 8 + level * 2 + bonus, 
+                defense: 2 + Math.floor(level * 1.5) + bonus 
             };
         };
 
-        // Fallback for when AI is completely missing or fails
+        const stats = calculateFallbackStats(targetLevel);
         const fallbackMonster = {
             name: isZh ? "憤怒火雞" : "Angry Turkey",
             level: targetLevel,
-            ...calculateFallbackStats(targetLevel),
+            hp: stats.hp,
+            maxHp: stats.hp,
+            mp: stats.mp,
+            maxMp: stats.mp,
+            attack: stats.attack,
+            defense: stats.defense,
             description: isZh 
               ? "一隻被激怒的巨型火雞，眼神中燃燒著對感恩節的復仇之火。" 
               : "A giant turkey fueled by rage and vengeance against Thanksgiving.",
@@ -920,9 +926,9 @@
         Language: ${langPrompt}.
         Return JSON with:
         - name (Creative name like 'Mecha-Gobbler', 'Count Turkula'. Do NOT include 'Lv.' in the name string)
-        - hp (integer, high stats, challenging for RPG player Level ${targetLevel})
+        - hp (integer, balanced stats for RPG player Level ${targetLevel})
         - mp (integer, balanced for Level ${targetLevel})
-        - attack (integer, high damage, balanced for Level ${targetLevel})
+        - attack (integer, balanced damage for Level ${targetLevel})
         - defense (integer, balanced for Level ${targetLevel})
         - description (Funny but epic RPG flavor text, max 2 sentences)
         - visualPrompt (A short English description strictly for generating a pixel art image of this monster. MUST include the word 'Turkey' or 'Chicken' monster. 
@@ -987,12 +993,16 @@
                 }
             } else {
                 console.warn("Image generation returned no candidates (likely safety block).");
+                // Explicitly set fallback if no candidates
+                imageUrl = window.MONSTER_FALLBACK_URL;
             }
            
           } catch (imgError) {
             console.warn("Image generation skipped or failed:", imgError);
-            // Use Dynamic Fallback based on name seed so it doesn't look boring
-            imageUrl = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(data.name)}`;
+            
+            // Explicitly set Dynamic Fallback on ANY image error (including 429)
+            // Added current time to seed to avoid caching issues if names are reused repeatedly
+            imageUrl = window.MONSTER_FALLBACK_URL;
             
             // Detect Quota Error (429) or Service Unavailable (503)
             const errStr = String(imgError);
@@ -2263,6 +2273,13 @@
           setTownNPCs(newNPCs);
         }, [currentScene]);
 
+        // Fix missing NPCs on load/respawn if list is empty
+        useEffect(() => {
+            if (gameState === GameState.TOWN && townNPCs.length === 0) {
+                initTownNPCs();
+            }
+        }, [gameState, townNPCs, initTownNPCs]);
+
         useEffect(() => {
             if (gameState !== GameState.TOWN || activeShop) return;
 
@@ -3042,8 +3059,24 @@
                           return;
                       }
 
+                      // Check for shops first
+                      let shop = null;
+                      if (tile === 'g') shop = 'GUILD';
+                      else if (tile === 'w') shop = 'WEAPON';
+                      else if (tile === 'a') shop = 'ARMOR';
+                      else if (tile === 'i') shop = 'ITEM';
+                      else if (tile === 'm') shop = 'MAGIC';
+
+                      if (shop) {
+                          audioService.playSfx('CONFIRM');
+                          setActiveShop(shop);
+                          setTownMessage("");
+                          setMenuIndex(0);
+                          return; // Shop entered, stop processing
+                      }
+
+                      // Check for NPC interaction second
                       const npc = townNPCs.find(n => getDist({x: n.x, y: n.y}, townPlayerPos) <= 1);
-                      
                       if (npc) {
                           audioService.playSfx('CONFIRM');
                           let msg = `[${npc.name}]: ${npc.dialogue}`;
@@ -3068,20 +3101,6 @@
                           }
                           setTownMessage(msg);
                           return; 
-                      }
-
-                      let shop = null;
-                      if (tile === 'g') shop = 'GUILD';
-                      else if (tile === 'w') shop = 'WEAPON';
-                      else if (tile === 'a') shop = 'ARMOR';
-                      else if (tile === 'i') shop = 'ITEM';
-                      else if (tile === 'm') shop = 'MAGIC';
-
-                      if (shop) {
-                          audioService.playSfx('CONFIRM');
-                          setActiveShop(shop);
-                          setTownMessage("");
-                          setMenuIndex(0);
                       }
                       return;
                   }
@@ -3223,14 +3242,21 @@
                           exp: Math.max(currentLevelMinExp, prev.exp - penalty)
                       };
                   });
+                  
+                  // Fix respawn coordinates logic
                   setGameState(GameState.TOWN);
-                  setSelectedLocation('castle');
+                  const mapData = getCurrentMapData();
+                  const townLoc = findTileLocation(mapData, 'C');
+                  if (townLoc) setPlayerPos(townLoc);
+                  
                   setTownPlayerPos(TOWN_START_POS);
+                  setSelectedLocation('castle');
                   setTownMessage(lang === Language.ZH ? "你被救回了城鎮，雖然有些損失，但命保住了。" : "You were revived in town. Some XP lost, but you live.");
                   setMenuIndex(0);
+                  initTownNPCs(); // Fix missing NPCs after death
               }
           }
-        }, [gameState, menuIndex, battleState, loading, player, enemy, lang, selectedLocation, playerPos, townPlayerPos, dungeonPlayerPos, activeShop, currentScene, dungeonFloor, dungeonProgress, showSaveMenu, showLoadMenu, playerNameInput, notification, prevGameState, inputCooldown, showReincarnationModal, pendingReincarnationPlayer, townNPCs, showAboutModal, titleSelection, hasSaves, showApiKeyModal]);
+        }, [gameState, menuIndex, battleState, loading, player, enemy, lang, selectedLocation, playerPos, townPlayerPos, dungeonPlayerPos, activeShop, currentScene, dungeonFloor, dungeonProgress, showSaveMenu, showLoadMenu, playerNameInput, notification, prevGameState, inputCooldown, showReincarnationModal, pendingReincarnationPlayer, townNPCs, showAboutModal, titleSelection, hasSaves, showApiKeyModal, initTownNPCs]);
 
         const handleMapClick = (targetX, targetY, type) => {
             if (loading || showSaveMenu || showLoadMenu || notification || inputCooldown || showReincarnationModal || showAboutModal || showApiKeyModal) return;

@@ -174,7 +174,7 @@
         DEFEAT: 'DEFEAT'
       };
 
-      window.GAME_VERSION = "v1.6.1";
+      window.GAME_VERSION = "v1.6.2";
 
       window.TRANSLATIONS = {
         [window.Language.EN]: {
@@ -900,23 +900,18 @@
             };
         };
 
-        if (!ai) {
-           const stats = calculateFallbackStats(targetLevel);
-           return {
+        // Fallback for when AI is completely missing or fails
+        const fallbackMonster = {
             name: isZh ? "憤怒火雞" : "Angry Turkey",
             level: targetLevel,
-            hp: stats.hp,
-            maxHp: stats.hp,
-            mp: stats.mp,
-            maxMp: stats.mp,
-            attack: stats.attack,
-            defense: stats.defense,
+            ...calculateFallbackStats(targetLevel),
             description: isZh 
               ? "一隻被激怒的巨型火雞，眼神中燃燒著對感恩節的復仇之火。" 
               : "A giant turkey fueled by rage and vengeance against Thanksgiving.",
-            imageUrl: window.MONSTER_FALLBACK_URL 
-          };
-        }
+            imageUrl: window.MONSTER_FALLBACK_URL
+        };
+
+        if (!ai) return fallbackMonster;
 
         const langPrompt = isZh ? "Traditional Chinese (Taiwan)" : "English";
         const prompt = `Generate a 'Mutant Turkey Monster' or 'Poultry Beast' enemy for a satirical retro RPG game. 
@@ -925,12 +920,14 @@
         Language: ${langPrompt}.
         Return JSON with:
         - name (Creative name like 'Mecha-Gobbler', 'Count Turkula'. Do NOT include 'Lv.' in the name string)
-        - hp (integer, balanced for Level ${targetLevel})
+        - hp (integer, high stats, challenging for RPG player Level ${targetLevel})
         - mp (integer, balanced for Level ${targetLevel})
-        - attack (integer, balanced for Level ${targetLevel})
+        - attack (integer, high damage, balanced for Level ${targetLevel})
         - defense (integer, balanced for Level ${targetLevel})
         - description (Funny but epic RPG flavor text, max 2 sentences)
-        - visualPrompt (A short English description strictly for generating a pixel art image of this monster. MUST include the word 'Turkey' or 'Chicken' monster. Example: 'A cyborg turkey with laser eyes', 'A giant turkey wearing knight armor'. Describe color, features, and pose.)`;
+        - visualPrompt (A short English description strictly for generating a pixel art image of this monster. MUST include the word 'Turkey' or 'Chicken' monster. 
+        IMPORTANT: The prompt must be FAMILY FRIENDLY, CUTE, CARTOON STYLE, NO BLOOD, NO VIOLENCE, NO GORE to pass safety filters. 
+        Example: 'A cute robot turkey', 'A round giant chicken wearing a crown'. Describe color and features.)`;
 
         try {
           const response = await ai.models.generateContent({
@@ -956,12 +953,14 @@
 
           const data = JSON.parse(response.text || '{}');
           let imageUrl = window.MONSTER_FALLBACK_URL;
+          let imageErrorMsg = null;
 
           try {
-            const imagePrompt = `Pixel art sprite of a ${data.visualPrompt}. Retro 16-bit RPG style monster, isolated on white background, full body visible. High quality, crisp lines, fantasy style.`;
+            // Force strict safe prompt structure to avoid rejection
+            const imagePrompt = `Pixel art sprite of a ${data.visualPrompt}. Retro 16-bit RPG style monster, isolated on white background. Cute, cartoon style, family friendly, no violence.`;
             
             const imageGenPromise = ai.models.generateContent({
-              model: 'gemini-2.5-flash-image', // Fixed: Use correct model for image generation
+              model: 'gemini-2.5-flash-image', 
               contents: {
                 parts: [{ text: imagePrompt }]
               },
@@ -972,20 +971,34 @@
               }
             });
 
+            // Increase timeout to 25 seconds for image generation
             const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error("Image generation timed out")), 15000)
+              setTimeout(() => reject(new Error("Image generation timed out (25s)")), 25000)
             );
 
             const imageResponse = await Promise.race([imageGenPromise, timeoutPromise]);
-
-            for (const part of imageResponse.candidates[0].content.parts) {
-              if (part.inlineData) {
-                imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                break;
-              }
+            
+            if (imageResponse && imageResponse.candidates && imageResponse.candidates.length > 0) {
+                 for (const part of imageResponse.candidates[0].content.parts) {
+                  if (part.inlineData) {
+                    imageUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                    break;
+                  }
+                }
+            } else {
+                console.warn("Image generation returned no candidates (likely safety block).");
             }
+           
           } catch (imgError) {
             console.warn("Image generation skipped or failed:", imgError);
+            // Use Dynamic Fallback based on name seed so it doesn't look boring
+            imageUrl = `https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(data.name)}`;
+            
+            // Detect Quota Error (429) or Service Unavailable (503)
+            const errStr = String(imgError);
+            if (errStr.includes("429") || errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("Quota exceeded")) {
+                imageErrorMsg = isZh ? "API 圖片額度已滿，使用替代圖像" : "Image Quota Exceeded - Using Fallback";
+            }
           }
 
           return {
@@ -998,7 +1011,8 @@
             attack: data.attack,
             defense: data.defense,
             description: data.description,
-            imageUrl: imageUrl
+            imageUrl: imageUrl,
+            imageError: imageErrorMsg
           };
 
         } catch (error) {
@@ -2511,6 +2525,11 @@
 
           const newEnemy = await generateDinosaur(targetLevel, lang);
           
+          if (newEnemy.imageError) {
+              setNotification(newEnemy.imageError);
+              setTimeout(() => setNotification(""), 3000);
+          }
+
           if (isBoss) {
               newEnemy.isBoss = true;
               newEnemy.name = `BOSS: ${newEnemy.name}`;

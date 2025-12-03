@@ -1,17 +1,9 @@
 <div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+<h1>勇者鬥火雞</h1>
+   <p>AI融入遊戲生成，勇者與清秀佳人的愛德華王子島冒險故事，HTML5版。</p>
+   <p>可使用自己的 API Key 來套用 AI融入功能，會依您的圖像或文字生成額度與權限產生差異。</p>
 </div>
-
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/drive/1BnLmJupg8wzhRCq2BPpGrnb_ISlrMZwR
-
-## Run Locally
-
 **Prerequisites:**  Node.js
-
 
 1. Install dependencies:
    `npm install`

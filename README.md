@@ -1,6 +1,6 @@
 <div align="center">
 <h1>勇者鬥火雞</h1>
-   <p>AI融入遊戲生成，勇者與清秀佳人的愛德華王子島冒險故事，HTML5版。</p>
+   <p>勇者鬥火雞，融入AI生成的RPG遊戲，勇者與清秀佳人的愛德華王子島冒險故事，HTML5版。</p>
    <p>可使用自己的 API Key 來套用 AI融入功能，會依您的圖像或文字生成額度與權限產生差異。</p>
 </div>
 **Prerequisites:**  Node.js
